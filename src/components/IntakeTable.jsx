@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { classifyRisk } from "@/utils/riskEngine";
 import { validateSubmission, validationStatus } from "@/utils/validation";
 import { RiskBadge } from "@/components/RiskBadge";
+import { ApprovalBadge } from "@/components/ApprovalBadge";
+import { AuditTrail } from "@/components/AuditTrail";
 import {
   Dialog,
   DialogContent,
@@ -9,7 +11,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { ChevronDown, ChevronRight, Pencil } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, ChevronUp } from "lucide-react";
 
 const COUNTRIES = [
   "United States", "United Kingdom", "Germany", "France", "Switzerland",
@@ -42,6 +44,7 @@ const empty = () => ({
   id_verification_date: "",
   relationship_manager: "",
   documentation_complete: false,
+  lastUpdatedAt: new Date().toISOString(),
 });
 
 const cellInput =
@@ -133,10 +136,23 @@ function BoolCell({ value, onCommit }) {
 
 function EditDialog({ open, onOpenChange, record, onSave }) {
   const [form, setForm] = useState(record ?? empty());
+  const [auditOpen, setAuditOpen] = useState(false);
   useEffect(() => { if (record) setForm(record); }, [record]);
 
   if (!record) return null;
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  // Compute current risk to determine if approval is required
+  const computed = classifyRisk(form);
+  const isHighRisk = computed.risk === "HIGH";
+
+  // For HIGH risk: force kyc_status to ENHANCED_DUE_DILIGENCE
+  const effectiveKycStatus = isHighRisk ? "ENHANCED_DUE_DILIGENCE" : form.kyc_status;
+  
+  // For HIGH risk: filter out APPROVED from KYC options
+  const kycOptions = isHighRisk 
+    ? KYC.filter(k => k !== "APPROVED")
+    : KYC;
 
   const Field = ({ label, children }) => (
     <label className="flex flex-col gap-1 text-xs">
@@ -150,7 +166,20 @@ function EditDialog({ open, onOpenChange, record, onSave }) {
       <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit client — {record.client_id}</DialogTitle>
+          {record.lastUpdatedAt && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Last updated at {new Date(record.lastUpdatedAt).toLocaleString()}
+            </p>
+          )}
         </DialogHeader>
+
+        {/* Show approval badge if HIGH risk */}
+        {isHighRisk && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+            <ApprovalBadge requiresApproval={true} />
+          </div>
+        )}
+
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="Client ID"><input className={cellInput} value={form.client_id ?? ""} disabled /></Field>
           <Field label="Name"><input className={cellInput} value={form.client_name ?? ""} onChange={(e) => set("client_name", e.target.value)} /></Field>
@@ -160,7 +189,20 @@ function EditDialog({ open, onOpenChange, record, onSave }) {
           <Field label="Country"><Select value={form.country_of_tax_residence} onChange={(v) => set("country_of_tax_residence", v)} options={COUNTRIES} /></Field>
           <Field label="Annual Income"><input type="number" className={cellInput} value={form.annual_income ?? ""} onChange={(e) => set("annual_income", e.target.value === "" ? null : Number(e.target.value))} /></Field>
           <Field label="Source of Funds"><Select value={form.source_of_funds} onChange={(v) => set("source_of_funds", v)} options={SOURCES} /></Field>
-          <Field label="KYC Status"><Select value={form.kyc_status} onChange={(v) => set("kyc_status", v)} options={KYC} /></Field>
+          <Field label="KYC Status">
+            {isHighRisk ? (
+              <div className="flex items-center gap-2">
+                <input 
+                  className={cellInput} 
+                  value={effectiveKycStatus} 
+                  disabled 
+                />
+                <span className="text-xs text-muted-foreground">Enforced for HIGH risk</span>
+              </div>
+            ) : (
+              <Select value={form.kyc_status} onChange={(v) => set("kyc_status", v)} options={kycOptions} />
+            )}
+          </Field>
           <Field label="Relationship Manager"><input className={cellInput} value={form.relationship_manager ?? ""} onChange={(e) => set("relationship_manager", e.target.value)} /></Field>
           <Field label="ID Verification Date"><input type="date" className={cellInput} value={form.id_verification_date ?? ""} onChange={(e) => set("id_verification_date", e.target.value)} /></Field>
           <div className="grid grid-cols-2 gap-2 sm:col-span-2">
@@ -170,15 +212,49 @@ function EditDialog({ open, onOpenChange, record, onSave }) {
             <label className="flex items-center gap-2 text-xs"><input type="checkbox" className="h-4 w-4" checked={!!form.documentation_complete} onChange={(e) => set("documentation_complete", e.target.checked)} /> Documentation Complete</label>
           </div>
         </div>
-        <DialogFooter>
-          <button onClick={() => onOpenChange(false)} className="min-h-9 rounded-md border border-input bg-background px-3 text-xs hover:bg-accent">Cancel</button>
-          <button
-            onClick={() => { onSave(form); onOpenChange(false); }}
-            className="min-h-9 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+        
+        {/* Buttons - Above Audit Trail */}
+        <div className="flex gap-2 border-t border-border pt-4">
+          <button 
+            onClick={() => onOpenChange(false)} 
+            className="min-h-9 rounded-md border border-input bg-background px-4 text-xs font-medium hover:bg-accent"
           >
-            Save
+            Cancel
           </button>
-        </DialogFooter>
+          <button
+            onClick={() => { 
+              // If HIGH risk, force kyc_status to ENHANCED_DUE_DILIGENCE before saving
+              const toSave = isHighRisk 
+                ? { ...form, kyc_status: "ENHANCED_DUE_DILIGENCE" }
+                : form;
+              onSave(toSave); 
+              onOpenChange(false); 
+            }}
+            className="min-h-9 rounded-md bg-primary px-4 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+          >
+            Save Changes
+          </button>
+        </div>
+
+        {/* Audit Trail Accordion */}
+        <div className="border-t border-border pt-4">
+          <button
+            onClick={() => setAuditOpen(!auditOpen)}
+            className="flex w-full items-center justify-between rounded-md bg-muted/50 p-3 hover:bg-muted"
+          >
+            <span className="text-xs font-semibold text-foreground">Audit Trail</span>
+            {auditOpen ? (
+              <ChevronUp className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </button>
+          {auditOpen && (
+            <div className="mt-3 rounded-md border border-border bg-muted/20 p-4">
+              <AuditTrail record={record} />
+            </div>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -273,19 +349,24 @@ export function IntakeTable({ records, onDelete, onUpdate }) {
                     </td>
                     <td className="px-2 py-2"><RiskBadge level={r.computed_risk} /></td>
                     <td className="px-2 py-2 text-right">
-                      <div className="flex justify-end gap-1">
-                        <button
-                          onClick={() => setEditing(r)}
-                          className="inline-flex min-h-8 items-center gap-1 rounded-md border border-input bg-background px-2 text-xs hover:bg-accent"
-                        >
-                          <Pencil className="h-3 w-3" /> Edit
-                        </button>
-                        <button
-                          onClick={() => onDelete(r.client_id)}
-                          className="min-h-8 rounded-md border border-input bg-background px-2 text-xs hover:bg-accent"
-                        >
-                          Delete
-                        </button>
+                      <div className="flex flex-col items-end justify-between gap-2">
+                        {r.computed_risk === "HIGH" && (
+                          <ApprovalBadge requiresApproval={true} />
+                        )}
+                        <div className="flex justify-end gap-1">
+                          <button
+                            onClick={() => setEditing(r)}
+                            className="inline-flex min-h-8 items-center gap-1 rounded-md border border-input bg-background px-2 text-xs hover:bg-accent"
+                          >
+                            <Pencil className="h-3 w-3" /> Edit
+                          </button>
+                          <button
+                            onClick={() => onDelete(r.client_id)}
+                            className="min-h-8 rounded-md border border-input bg-background px-2 text-xs hover:bg-accent"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
                     </td>
                   </tr>

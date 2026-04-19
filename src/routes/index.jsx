@@ -33,6 +33,7 @@ function enrichFromCSVRow(row) {
     ...row,
     created_at: now,
     updated_at: now,
+    lastUpdatedAt: now,
     input_snapshot: { ...row },
     computed_risk: computed.risk,
     computed_reasons: computed.reasons,
@@ -64,6 +65,7 @@ function SentinelApp() {
     const enriched = {
       ...record,
       updated_at: now,
+      lastUpdatedAt: now,
       change_log: record.change_log || [
         {
           timestamp: now,
@@ -115,7 +117,8 @@ function SentinelApp() {
       prev.map((r) => {
         if (r.client_id !== id) return r;
         const old_value = r[field];
-        const updated = { ...r, [field]: value, updated_at: new Date().toISOString() };
+        const now = new Date().toISOString();
+        const updated = { ...r, [field]: value, updated_at: now, lastUpdatedAt: now };
         const { risk, reasons } = classifyRisk(updated);
         updated.computed_risk = risk;
         updated.computed_reasons = reasons;
