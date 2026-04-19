@@ -9,6 +9,7 @@ import { IntakeTable } from "@/components/IntakeTable";
 import { Filters } from "@/components/Filters";
 import { Report } from "@/components/Report";
 import { AddClientForm } from "@/components/AddClientForm";
+import { Logo } from "@/components/Logo";
 
 export const Route = createFileRoute("/")({
   component: SentinelApp,
@@ -227,10 +228,7 @@ function SentinelApp() {
     <div className="min-h-screen bg-gradient-to-br from-background to-muted/20">
       <header className="border-b border-border bg-white/80 backdrop-blur-sm shadow-sm">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-5">
-          <div className="flex items-baseline gap-2">
-            <h1 className="text-3xl font-bold tracking-tight text-foreground">Halcyon</h1>
-            <p className="text-sm font-semibold text-primary">SENTINEL Onboarding</p>
-          </div>
+          <Logo />
           <div className="flex flex-wrap items-center gap-3 rounded-lg bg-muted/50 px-4 py-2">
             <span className="text-sm font-semibold text-foreground">{records.length}</span>
             <span className="text-xs text-muted-foreground">records</span>
