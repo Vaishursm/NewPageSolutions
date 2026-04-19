@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { classifyRisk } from "@/utils/riskEngine";
-import { validateSubmission, validationStatus } from "@/utils/validation";
+import { validateSubmission, validationStatus, validateKycApproval } from "@/utils/validation";
 import { RiskBadge } from "@/components/RiskBadge";
 import { ApprovalBadge } from "@/components/ApprovalBadge";
 import { AuditTrail } from "@/components/AuditTrail";
@@ -11,7 +11,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { ChevronDown, ChevronRight, Pencil, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, ChevronUp, AlertCircle } from "lucide-react";
 
 const COUNTRIES = [
   "United States", "United Kingdom", "Germany", "France", "Switzerland",
@@ -50,14 +50,32 @@ const empty = () => ({
 const cellInput =
   "w-full min-h-9 rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring";
 
-function Select({ value, onChange, options, placeholder = "—", autoFocus, onBlur }) {
+function Select({ value, onChange, options, placeholder = "—", autoFocus, onBlur, onBeforeChange }) {
+  const selectRef = useRef(null);
+
+  const handleChange = (newValue) => {
+    // If onBeforeChange handler exists, call it and let it decide if change should proceed
+    if (onBeforeChange) {
+      const shouldProceed = onBeforeChange(newValue);
+      if (!shouldProceed) {
+        // Reset the select back to current value
+        if (selectRef.current) {
+          selectRef.current.value = value ?? "";
+        }
+        return; // Block the change
+      }
+    }
+    onChange(newValue);
+  };
+
   return (
     <select
+      ref={selectRef}
       autoFocus={autoFocus}
       onBlur={onBlur}
       className={cellInput}
       value={value ?? ""}
-      onChange={(e) => onChange(e.target.value)}
+      onChange={(e) => handleChange(e.target.value)}
     >
       <option value="">{placeholder}</option>
       {options.map((o) => (
@@ -68,7 +86,7 @@ function Select({ value, onChange, options, placeholder = "—", autoFocus, onBl
 }
 
 /** A cell that displays a value in view mode and turns into an editor on click. */
-function EditableCell({ value, display, onCommit, type = "text", options }) {
+function EditableCell({ value, display, onCommit, type = "text", options, onBeforeCommit }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? "");
 
@@ -77,6 +95,16 @@ function EditableCell({ value, display, onCommit, type = "text", options }) {
   }, [value, editing]);
 
   function commit(v) {
+    // Check if we should proceed with commit
+    if (onBeforeCommit) {
+      const shouldProceed = onBeforeCommit(v);
+      if (!shouldProceed) {
+        setEditing(false);
+        setDraft(value ?? "");
+        return; // Don't commit
+      }
+    }
+    
     setEditing(false);
     if (v !== value) onCommit(v);
   }
@@ -88,7 +116,7 @@ function EditableCell({ value, display, onCommit, type = "text", options }) {
           autoFocus
           value={draft}
           onChange={(v) => { setDraft(v); commit(v); }}
-          onBlur={() => setEditing(false)}
+          onBlur={() => { setEditing(false); setDraft(value ?? ""); }}
           options={options}
         />
       );
@@ -137,7 +165,8 @@ function BoolCell({ value, onCommit }) {
 function EditDialog({ open, onOpenChange, record, onSave }) {
   const [form, setForm] = useState(record ?? empty());
   const [auditOpen, setAuditOpen] = useState(false);
-  useEffect(() => { if (record) setForm(record); }, [record]);
+  const [approvalErrors, setApprovalErrors] = useState([]);
+  useEffect(() => { if (record) setForm(record); setApprovalErrors([]); }, [record]);
 
   if (!record) return null;
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -180,6 +209,23 @@ function EditDialog({ open, onOpenChange, record, onSave }) {
           </div>
         )}
 
+        {/* Show approval errors if any */}
+        {approvalErrors.length > 0 && (
+          <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+            <div className="flex gap-2">
+              <AlertCircle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
+              <div className="text-xs text-destructive">
+                <p className="font-medium mb-1">Cannot approve: Missing required fields</p>
+                <ul className="space-y-1 list-disc list-inside">
+                  {approvalErrors.map((err, i) => (
+                    <li key={i}>{err}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="Client ID"><input className={cellInput} value={form.client_id ?? ""} disabled /></Field>
           <Field label="Name"><input className={cellInput} value={form.client_name ?? ""} onChange={(e) => set("client_name", e.target.value)} /></Field>
@@ -200,7 +246,24 @@ function EditDialog({ open, onOpenChange, record, onSave }) {
                 <span className="text-xs text-muted-foreground">Enforced for HIGH risk</span>
               </div>
             ) : (
-              <Select value={form.kyc_status} onChange={(v) => set("kyc_status", v)} options={kycOptions} />
+              <Select 
+                value={form.kyc_status} 
+                onChange={(v) => set("kyc_status", v)} 
+                onBeforeChange={(newStatus) => {
+                  if (newStatus === "APPROVED") {
+                    const validation = validateKycApproval(form);
+                    if (!validation.isValid) {
+                      setApprovalErrors(validation.missingFields.map(f => `${f}: Required for approval`));
+                      return false; // Block the change
+                    }
+                    setApprovalErrors([]);
+                  } else {
+                    setApprovalErrors([]);
+                  }
+                  return true; // Allow the change
+                }}
+                options={kycOptions} 
+              />
             )}
           </Field>
           <Field label="Relationship Manager"><input className={cellInput} value={form.relationship_manager ?? ""} onChange={(e) => set("relationship_manager", e.target.value)} /></Field>
@@ -262,6 +325,7 @@ function EditDialog({ open, onOpenChange, record, onSave }) {
 
 export function IntakeTable({ records, onDelete, onUpdate }) {
   const [errors, setErrors] = useState({});
+  const [approvalError, setApprovalError] = useState(null); // Track approval validation errors
   const [expanded, setExpanded] = useState(() => new Set());
   const [editing, setEditing] = useState(null); // record being edited in dialog
 
@@ -281,6 +345,23 @@ export function IntakeTable({ records, onDelete, onUpdate }) {
     });
   }
 
+  // Handle KYC status change with validation
+  function handleKycStatusUpdate(clientId, newStatus) {
+    const record = records.find((r) => r.client_id === clientId);
+    if (!record) return;
+
+    if (newStatus === "APPROVED") {
+      // Validate all required fields before allowing approval
+      const validation = validateKycApproval(record);
+      if (!validation.isValid) {
+        // Don't update - show validation would fail
+        return;
+      }
+    }
+    
+    onUpdate(clientId, "kyc_status", newStatus);
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -294,6 +375,22 @@ export function IntakeTable({ records, onDelete, onUpdate }) {
           {Object.entries(errors).map(([k, v]) => (
             <div key={k}><strong>{k}</strong>: {v}</div>
           ))}
+        </div>
+      )}
+
+      {approvalError && (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+          <div className="flex gap-2">
+            <AlertCircle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
+            <div className="text-xs text-destructive">
+              <p className="font-medium mb-1">Cannot approve: Missing required fields</p>
+              <ul className="space-y-1 list-disc list-inside">
+                {approvalError.missingFields.map((field, i) => (
+                  <li key={i}>{field}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
         </div>
       )}
 
@@ -339,7 +436,24 @@ export function IntakeTable({ records, onDelete, onUpdate }) {
                       <EditableCell value={r.annual_income} type="number" onCommit={(v) => onUpdate(r.client_id, "annual_income", v)} />
                     </td>
                     <td className="px-2 py-2">
-                      <EditableCell value={r.kyc_status} options={KYC} onCommit={(v) => onUpdate(r.client_id, "kyc_status", v)} />
+                      <EditableCell 
+                        value={r.kyc_status} 
+                        options={KYC} 
+                        onCommit={(v) => handleKycStatusUpdate(r.client_id, v)}
+                        onBeforeCommit={(newStatus) => {
+                          if (newStatus === "APPROVED") {
+                            const validation = validateKycApproval(r);
+                            if (!validation.isValid) {
+                              setApprovalError(validation);
+                              return false;
+                            }
+                            setApprovalError(null);
+                          } else {
+                            setApprovalError(null);
+                          }
+                          return true;
+                        }}
+                      />
                     </td>
                     <td className="px-2 py-2">
                       <BoolCell value={r.pep_status} onCommit={(v) => onUpdate(r.client_id, "pep_status", v)} />
