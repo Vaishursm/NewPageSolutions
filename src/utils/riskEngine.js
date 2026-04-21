@@ -1,4 +1,4 @@
-// Pure risk classification engine for SENTINEL onboarding.
+// Pure isk classification engine for SENTINEL onboarding.
 // Returns { risk: 'HIGH'|'MEDIUM'|'LOW'|'PENDING', reasons: string[] }
 
 /**

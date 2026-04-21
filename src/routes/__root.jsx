@@ -1,5 +1,6 @@
 import { Outlet, Link, createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import appCss from "../styles.css?url";
+import halcyonIcon from "../asset/Halcyon_Icon_RGB_GRAD-POS.svg";
 
 function NotFoundComponent() {
   return (
@@ -44,7 +45,7 @@ export const Route = createRootRoute({
       },
       {
         rel: "icon",
-        href: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><defs><linearGradient id='grad' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%231B2A4A;stop-opacity:1' /><stop offset='100%' style='stop-color:%232D4A7B;stop-opacity:1' /></linearGradient></defs><circle cx='100' cy='100' r='95' fill='url(%23grad)'/><text x='100' y='115' font-size='140' font-weight='bold' fill='white' text-anchor='middle' dominant-baseline='middle' font-family='Arial, sans-serif'>H</text></svg>",
+        href: halcyonIcon,
         type: "image/svg+xml",
       },
     ],
